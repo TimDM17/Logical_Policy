@@ -31,7 +31,31 @@ def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explaine
 
     val_module:
     
-    Create the valuation module that will translate game states to logical truth values
+    Create the valuation module that will translate atoms from game states to logical truth values
+    The ValuationModule serves these specific technical purposes:
+    
+    1. Differentiability: By using PyTorch tensors and operations, enables gradient flow for learning
+    2. Dynamic Reflection: Uses Python's introspection capabilities to dynamically load and bind functions
+    3. Tensor Conversion: Implements a complex type system mapping between logical terms and tensor representations
+    4. Batched Processing: Supports batch-wise operations for efficient GPU utilization
     """
     val_fn_path = f"in/envs/{env_name}/valuation.py"
     val_module = ValuationModule(val_fn_path, lang, device)
+
+    """
+    FactsConverter: Creates complete valuation vector for all atoms
+                    This is the complete "world state" in logical terms, representing which
+                    logical facts are true in the current game state
+    """
+    FC = FactsConverter(lang=lang, valuation_module=val_module, device=device)
+
+    """
+    
+    """
+    prednames = []
+    for clause in clauses:
+        if clause.head.pred.name not in prednames:
+            prednames.append(clause.head.pred.name)
+    m = len(prednames)
+    # m = 5
+    IM = build_infer_module(clauses, atoms, lang, m=m, infer_step=2, train=train, device=device)
