@@ -20,3 +20,18 @@ def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explaine
     - atoms: All possible ground atoms generated from the language
     """
     lang, clauses, bk, atoms = get_lang(lark_path, lang_base_path, rules)
+
+    """
+    val_fn_path: 
+    
+    Define path to environment-specific valuation functions
+    Each environment has its own valuation.py with predicates specific to that game's
+    objects and mechanics. These functions calculate probabilistic truth values based
+    on the game state.
+
+    val_module:
+    
+    Create the valuation module that will translate game states to logical truth values
+    """
+    val_fn_path = f"in/envs/{env_name}/valuation.py"
+    val_module = ValuationModule(val_fn_path, lang, device)
