@@ -31,7 +31,9 @@ def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explaine
 
     val_module:
     
-    Create the valuation module that will translate atoms from game states to logical truth values
+    Create the valuation module that will translate a object-centric representation to a logical truth values
+    Evaluates basic predicates from game state -> "Player is near alien"
+
     The ValuationModule serves these specific technical purposes:
     
     1. Differentiability: By using PyTorch tensors and operations, enables gradient flow for learning
@@ -46,11 +48,20 @@ def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explaine
     FactsConverter: Creates complete valuation vector for all atoms
                     This is the complete "world state" in logical terms, representing which
                     logical facts are true in the current game state
+                    Creates valuation vector for all atoms -> "World state"
     """
     FC = FactsConverter(lang=lang, valuation_module=val_module, device=device)
 
     """
-    
+    Creating the inferece module - the component responsible for applying logical rules
+    to derive new facts
+
+    build_infer_module: Applies logical rules to derive higher-level facts -> "Player is in danger"
+
+    This is where the "symbolic reasoning" part of neural-symbolic integration happens.
+    While the earlier components ground predicates in the game state, this module applies the logical rules
+    that encode game strategy or policy. It's the component that takes basic facts like
+    "player near alien" and derives conclusions like "player should move right".
     """
     prednames = []
     for clause in clauses:
@@ -59,3 +70,9 @@ def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explaine
     m = len(prednames)
     # m = 5
     IM = build_infer_module(clauses, atoms, lang, m=m, infer_step=2, train=train, device=device)
+
+
+
+
+
+

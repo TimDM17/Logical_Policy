@@ -1,6 +1,8 @@
 from nsfr.fol.logic import *
 from nsfr.fol.data_utils import DataUtils
 from nsfr.fol.language import DataType
+from nsfr.infer import InferModule
+from nsfr.tensor_encoder import TensorEncoder
 
 
 
@@ -66,3 +68,46 @@ def generate_atoms(lang):
                 #    str(sorted([str(arg) for arg in args])))
                 # print('add atom: ', Atom(pred, args))
     return spec_atoms + sorted(atoms)
+
+
+def build_infer_module(clauses, atoms, lang, device, m=3, infer_step=3, train=False):
+    """
+    Creates a differentiable forward-chaining inference module for neural-symbolic reasoning.
+
+    This function builds the reasoning engine of the neural-symbolic system by:
+    1. Encoding logical clauses into tensor representation via TensorEncoder
+        - Converts symbolic rules into a 4D index tensor I [clauses, atoms, substitutions, body_length]
+        - Handles variable substitutions and unification
+    
+    2. Creating an InferModule that performs differentiable logical inference
+        - Applies rules repeatedly for 'infer_step' iterations
+        - Supports trainable weights for rules when train=True
+        - Uses soft logical operators to maintain gradient flow
+    
+    The resulting module takes a valuation tensor (from FactsConverter) and performs
+    logical reasoning to derive higher-level facts. This is where rules like 
+    "dangerous(X) :- close_by_alien(player, X)" are applied to derive facts like 
+    "dangerous(alien1)" from "close_by_aliene(player, alien1)".
+
+    Args:
+        clauses: List of logical rules to apply
+        atoms: List of all possible ground atoms
+        lang: The logical language definition
+        device: Computation device (CPU/GPU)
+        m: Number of unique predicates in rule heads
+        infer_step: Number of inference steps to perform
+        train: Whether to use trainable weights
+
+    Returns:
+        im: Differentiable inference module
+    """
+    
+    te = TensorEncoder(lang, atoms, clauses, device=device)
+    # This creates a 4D index tensor "I" with shape [C, G, S, L]
+    I = te.encode()
+    # The InferModule uses the encoded tensor to perform differentiable logical inference
+    # Performs forward-chaining inference through a fixed number of steps
+    # Can have trainable weights for rule importance if train = True
+    # Uses differentiable logical operations to ensure gradient flow
+    im = InferModule(I, m=m, infer_step=infer_step, device=device, train=train)
+    return im
