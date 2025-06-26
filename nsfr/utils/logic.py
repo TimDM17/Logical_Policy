@@ -111,3 +111,24 @@ def build_infer_module(clauses, atoms, lang, device, m=3, infer_step=3, train=Fa
     # Uses differentiable logical operations to ensure gradient flow
     im = InferModule(I, m=m, infer_step=infer_step, device=device, train=train)
     return im
+
+"""
+Finding Atom Indices:
+
+This utility function serves a critical role in the NSFReasoner
+1. It searches through the list of all possible atoms to find those with a specific predicate name
+2. It returns the index of the first atom with that predicate name
+3. This index is used to locate the corresponding probability in the valuation tensor
+
+Applied in the NSFReasoner:
+    The function specifically finds action predicates like "move_left" or "shoot" in the atom list,
+    allowing the system to extract their probabilities from the valuation tensor.
+    For example, if the predicate "mode_left" corresponds to atom index 42, then V_T[0, 42] gives
+    the probability of that action being valid.
+
+"""
+def get_index_by_predname(pred_str, atoms):
+    for i, atom in enumerate(atoms):
+        if atom.pred.name == pred_str:
+            return i
+    assert 1, pred_str + ' not found.'

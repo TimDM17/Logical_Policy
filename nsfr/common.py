@@ -5,7 +5,22 @@ from nsfr.utils.logic import get_lang, build_infer_module
 from nsfr.nsfr import NSFReasoner
 from nsfr.valuation import ValuationModule
 
-def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explaine=False):
+
+"""
+Game State Tensor (Z)
+      ↓
+FactsConverter (FC)
+      ↓
+Initial Valuation Vector (V_0)
+      ↓
+InferModule (IM)
+      ↓
+Final Valuation Vector (V_T)
+      ↓
+Action Probability Extraction
+"""
+
+def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explain=False):
     
     # Determine file paths for accessing the logical components
     current_path = os.path.dirname(__file__) # Get the directory of the current module
@@ -72,6 +87,23 @@ def get_nsfr_model(env_name: str, rules: str, device: str, train=False, explaine
     IM = build_infer_module(clauses, atoms, lang, m=m, infer_step=2, train=train, device=device)
 
 
+    """
+    Neuro-Symbolic Forward Reasoner
+
+    The NSFReasoner class is the central orchestrator
+    that integrates all components of the neural-symbolic reasoning system.
+    It provides a complete differentiable pipeline from raw game state observations to logically-
+    derived action probabilities
+
+    1. Differentiable Logic: Implements a fully differentiable logical reasoning system
+       that can be trained with gradient-based methods
+    2. Perception-Logic Integration: Bridges the gap between neural perception and symbolic reasoning
+    3. Zero-Shot Reasoning: Can apply logical rules to situations never seen before
+    4. Explainability: Provides transparency into the reasoning process, unlike black-box neural networks
+    """
+    NSFR = NSFReasoner(facts_converter=FC, infer_module=IM, atoms=atoms, bk=bk,
+                        clauses=clauses, device=device, train=train, explain=explain)
+    return NSFR
 
 
 
