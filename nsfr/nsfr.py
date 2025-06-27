@@ -104,15 +104,17 @@ class NSFReasoner(nn.Module):
         return prob
 
 
-
-
-
     def predict(self, v, predname):
         """Extract a value from the valuation tensor using a given predicate."""
         # v: batch * |atoms|
         target_index = get_index_by_predname(
             pred_str=predname, atoms=self.atoms)
         return v[:, target_index]
+
+
+    """
+    For better Explanation
+    """
 
     def print_program(self):
         """Print a summary of logic programs using continuous weights."""
