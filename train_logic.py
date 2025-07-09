@@ -47,7 +47,7 @@ def train():
     """
     
     # Create directory structure for experiment outputs
-    run_name = f"donkeykong_logic_lr_{LEARNING_RATE}"  # Unique name for this training run
+    run_name = f"logic_lr_{LEARNING_RATE}"  # Unique name for this training run
     experiment_dir = OUT_PATH / "runs" / run_name      # Main experiment directory
     checkpoint_dir = experiment_dir / "checkpoints"    # Directory for model checkpoints
     writer_dir = OUT_PATH / "tensorboard" / run_name   # Directory for TensorBoard logs
@@ -104,7 +104,7 @@ def train():
     start_time = time.time()
     
     # Reset environment to get initial observations
-    _, next_logic_obs = envs.reset()                      # Get initial logical state
+    next_logic_obs, _ = envs.reset()                      # Get initial logical state
     next_logic_obs = next_logic_obs.to(DEVICE)            # Move to device
     next_done = torch.zeros(NUM_ENVS).to(DEVICE)          # Initialize done flags
     
@@ -125,7 +125,7 @@ def train():
             logprobs[step] = logprob                       # Store log probability
             
             # Execute action in environment and observe result
-            _, next_logic_obs_np, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+            (next_logic_obs_np, _), reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_logic_obs = next_logic_obs_np.float().to(DEVICE)  # Convert to tensor and move to device
             
             # Process termination flags (episode ended due to failure or time limit)
