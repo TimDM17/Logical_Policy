@@ -1,11 +1,11 @@
 from typing import Sequence
 import torch
-from blendrl.env_vectorized import VectorizedNudgeBaseEnv
+from env_vectorized import VectorizedNudgeBaseEnv
 from hackatari.core import HackAtari
 import torch as th
 from ocatari.ram.donkeykong import MAX_NB_OBJECTS
 import gymnasium as gym
-from blendrl.env_utils import make_env
+from env_utils import make_env
 
 
 
