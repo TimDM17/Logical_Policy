@@ -30,10 +30,10 @@ except ImportError:
 @dataclass
 class Args:
     # Environment settings
-    env_name: str = "alien"             # Game environment to uese       
+    env_name: str = "seaquest"             # Game environment to uese       
     
     # Training parameters               
-    seed: int = 0                       # Random seed for reproducibility   
+    seed: int = 8                       # Random seed for reproducibility   
     num_envs: int = 8                   # Number of parallel environments for data collection   
     num_steps: int = 128                # Steps to collect per environment before updating   
     total_timesteps: int = 10000000     # Total environment steps for the entire training run   
