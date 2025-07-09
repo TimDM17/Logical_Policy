@@ -1,180 +1,285 @@
-# Import standard Python libraries for file operations, randomness, and timing
+
 import os
 import random
 import time
 import pickle
+import yaml
 from pathlib import Path
+from dataclasses import dataclass
 
-# Import numerical and deep learning libraries
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-# Import custom components for neural-symbolic reinforcement learning
-from logic_agent import LogicalAgent            # Neural-symbolic agent that uses logical reasoning
-from env_vectorized import VectorizedNudgeBaseEnv  # Environment wrapper that provides standardized interface
-from utils import save_hyperparams               # Utility for saving experiment parameters
 
-# Constants defining the training process
-OUT_PATH = Path("out_logic/")                   # Root directory for all output files
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # Use GPU if available
-NUM_ENVS = 8                                    # Number of parallel environments for data collection
-NUM_STEPS = 128                                 # Steps to collect per environment before updating
-TOTAL_TIMESTEPS = 10000000                      # Total environment steps for the entire training run
-SAVE_STEPS = 1000000                            # Save model checkpoint every million steps
-BATCH_SIZE = NUM_ENVS * NUM_STEPS               # Total transitions collected before update (1024)
-MINIBATCH_SIZE = BATCH_SIZE // 4                # Size of minibatches for gradient updates (256)
-NUM_ITERATIONS = TOTAL_TIMESTEPS // BATCH_SIZE  # Number of complete update cycles
-LEARNING_RATE = 2.5e-4                          # Learning rate for Adam optimizer
-GAMMA = 0.99                                    # Discount factor for future rewards
-GAE_LAMBDA = 0.95                               # Lambda parameter for GAE advantage estimation
-UPDATE_EPOCHS = 4                               # Number of passes through the data for each update
-CLIP_COEF = 0.1                                 # PPO clipping coefficient for trust region
-ENT_COEF = 0.01                                 # Entropy coefficient to encourage exploration
-SEED = 0                                        # Random seed for reproducibility
+from logic_agent import LogicalAgent            
+from env_vectorized import VectorizedNudgeBaseEnv  
+from utils import save_hyperparams               
 
-def train():
-    """
-    Main training function that implements PPO algorithm for training the logical agent.
-    This function orchestrates the complete training process:
-    - Initializes environments and agent
-    - Collects experience using the current policy
-    - Computes advantages and returns
-    - Updates policy and value networks
-    - Logs metrics and saves checkpoints
-    """
+
+try:
+    from rtpt import RTPT
+    has_rtpt = True
+except ImportError:
+    has_rtpt = False
+    print("RTPT not found. Progress tracking will be limited.")
+
+@dataclass
+class Args:
     
-    # Create directory structure for experiment outputs
-    run_name = f"logic_lr_{LEARNING_RATE}"  # Unique name for this training run
-    experiment_dir = OUT_PATH / "runs" / run_name      # Main experiment directory
-    checkpoint_dir = experiment_dir / "checkpoints"    # Directory for model checkpoints
-    writer_dir = OUT_PATH / "tensorboard" / run_name   # Directory for TensorBoard logs
-    os.makedirs(checkpoint_dir, exist_ok=True)         # Create checkpoint directory if it doesn't exist
-    os.makedirs(writer_dir, exist_ok=True)             # Create TensorBoard directory if it doesn't exist
+    env_name: str = "alien"                
     
-    # Initialize TensorBoard for tracking and visualizing metrics
+    
+    seed: int = 0                          
+    num_envs: int = 8                      
+    num_steps: int = 128                   
+    total_timesteps: int = 10000000        
+    save_steps: int = 1000000              
+    
+    
+    learning_rate: float = 2.5e-4          
+    gamma: float = 0.99                    
+    gae_lambda: float = 0.95               
+    update_epochs: int = 4                 
+    clip_coef: float = 0.1                 
+    ent_coef: float = 0.01                 
+    
+    
+    rules: str = "default"                 
+    recover: bool = False                  
+    mode: str = "logic"                    
+    
+    
+    batch_size: int = 0
+    minibatch_size: int = 0
+    num_iterations: int = 0
+
+
+OUT_PATH = Path("out_logic/")                   
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  
+
+def load_model_train(checkpoint_dir, n_envs, device):
+    
+    
+    checkpoints = list(checkpoint_dir.glob("step_*.pth"))
+    if not checkpoints:
+        raise ValueError(f"No checkpoints found in {checkpoint_dir}")
+    
+    
+    steps = [int(c.stem.split('_')[1]) for c in checkpoints]
+    most_recent_step = max(steps)
+    most_recent_checkpoint = checkpoint_dir / f"step_{most_recent_step}.pth"
+    
+    print(f"Loading checkpoint from step {most_recent_step}")
+    
+    
+    args_path = checkpoint_dir.parent / "config.yaml"
+    with open(args_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    
+    env = VectorizedNudgeBaseEnv.from_name(
+        config['env_name'],
+        n_envs=n_envs,
+        mode="logic",
+        seed=config['seed']
+    )
+    
+    
+    agent = LogicalAgent(env, rules=config['rules'], device=device)
+    agent.load_state_dict(torch.load(most_recent_checkpoint, map_location=device))
+    agent.to(device)
+    
+    return agent, most_recent_step
+
+def train(args):
+    
+    
+    
+    args.batch_size = args.num_envs * args.num_steps
+    args.minibatch_size = args.batch_size // 4
+    args.num_iterations = args.total_timesteps // args.batch_size
+    
+    
+    run_name = f"{args.env_name}_logic_lr_{args.learning_rate}_gamma_{args.gamma}_entcoef_{args.ent_coef}"
+    experiment_dir = OUT_PATH / "runs" / run_name      
+    checkpoint_dir = experiment_dir / "checkpoints"    
+    writer_dir = OUT_PATH / "tensorboard" / run_name   
+    os.makedirs(checkpoint_dir, exist_ok=True)         
+    os.makedirs(writer_dir, exist_ok=True)             
+    
+    
+    if has_rtpt:
+        rtpt = RTPT(name_initials="TS", experiment_name="LogicPolicy",
+                   max_iterations=int(args.total_timesteps / args.save_steps))
+        rtpt.start()
+    
+    
     writer = SummaryWriter(writer_dir)
+    writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
     
-    # Set random seeds for reproducibility across all random number sources
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
     
-    # Create environment and agent
-    env_name = "alien"                                         # Game environment to use
-    envs = VectorizedNudgeBaseEnv.from_name(env_name,          # Create 8 parallel environments
-                                          n_envs=NUM_ENVS, 
-                                          mode="logic",         # Use logical mode (vs. 'ppo' mode)
-                                          seed=SEED)
-    agent = LogicalAgent(envs, rules="default", device=DEVICE)  # Create logical agent with default rules
-    agent.to(DEVICE)                                           # Move agent to GPU if available
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     
-    # Print initial logical rules and their weights for reference
+    
+    if args.recover:
+        agent, global_step = load_model_train(checkpoint_dir, n_envs=args.num_envs, device=DEVICE)
+        save_step_bar = global_step
+        
+        
+        with open(checkpoint_dir / "training_log.pkl", "rb") as f:
+            episodic_returns, episodic_lengths, value_losses, policy_losses, entropies = pickle.load(f)
+    else:
+        
+        envs = VectorizedNudgeBaseEnv.from_name(args.env_name,
+                                              n_envs=args.num_envs, 
+                                              mode=args.mode,
+                                              seed=args.seed)
+        agent = LogicalAgent(envs, rules=args.rules, device=DEVICE)
+        agent.to(DEVICE)
+        
+        
+        global_step = 0
+        save_step_bar = args.save_steps
+        episodic_returns = []
+        episodic_lengths = []
+        value_losses = []
+        policy_losses = []
+        entropies = []
+    
+    
+    print("\n===== INITIAL LOGICAL POLICY =====")
     agent._print()
     
-    # Setup optimizer with separate parameter groups for actor and critic
+   
     optimizer = optim.Adam([
-        {"params": agent.logic_actor.parameters(), "lr": LEARNING_RATE},  # Optimize NSFR logical policy
-        {"params": agent.critic.parameters(), "lr": LEARNING_RATE},       # Optimize value network
-    ], eps=1e-5)  # Small epsilon for numerical stability
+        {"params": agent.logic_actor.parameters(), "lr": args.learning_rate},  
+        {"params": agent.critic.parameters(), "lr": args.learning_rate},       
+    ], eps=1e-5)  
     
-    # Create storage tensors for collecting experience
-    logic_observation_space = (envs.n_objects, 4)              # Shape of object-centric state representation
-    action_space = ()                                          # Shape of actions (scalar, so empty tuple)
-    # Initialize tensors for storing trajectory data
-    logic_obs = torch.zeros((NUM_STEPS, NUM_ENVS) + logic_observation_space).to(DEVICE)  # States
-    actions = torch.zeros((NUM_STEPS, NUM_ENVS) + action_space).to(DEVICE)               # Actions
-    logprobs = torch.zeros((NUM_STEPS, NUM_ENVS)).to(DEVICE)                            # Log probabilities
-    rewards = torch.zeros((NUM_STEPS, NUM_ENVS)).to(DEVICE)                             # Rewards
-    dones = torch.zeros((NUM_STEPS, NUM_ENVS)).to(DEVICE)                               # Episode terminations
-    values = torch.zeros((NUM_STEPS, NUM_ENVS)).to(DEVICE)                              # Value estimates
     
-    # Initialize tracking variables for monitoring training progress
-    global_step = 0                  # Total environment steps taken
-    save_step_bar = SAVE_STEPS       # Next step count for saving checkpoint
-    episodic_returns = []            # Track episode returns for statistics
-    episodic_lengths = []            # Track episode lengths for statistics
-    value_losses = []                # Track value network losses
-    policy_losses = []               # Track policy network losses
-    entropies = []                   # Track policy entropy values
+    envs = agent.env
+    logic_observation_space = (envs.n_objects, 4)              
+    action_space = ()                                          
     
-    # Start timer for computing training speed
+    
+    logic_obs = torch.zeros((args.num_steps, args.num_envs) + logic_observation_space).to(DEVICE)
+    actions = torch.zeros((args.num_steps, args.num_envs) + action_space).to(DEVICE)
+    logprobs = torch.zeros((args.num_steps, args.num_envs)).to(DEVICE)
+    rewards = torch.zeros((args.num_steps, args.num_envs)).to(DEVICE)
+    dones = torch.zeros((args.num_steps, args.num_envs)).to(DEVICE)
+    values = torch.zeros((args.num_steps, args.num_envs)).to(DEVICE)
+    
+    
+    episodic_game_returns = torch.zeros((args.num_envs)).to(DEVICE)
+    
+    
     start_time = time.time()
     
-    # Reset environment to get initial observations
-    next_logic_obs, _ = envs.reset()                      # Get initial logical state
-    next_logic_obs = next_logic_obs.to(DEVICE)            # Move to device
-    next_done = torch.zeros(NUM_ENVS).to(DEVICE)          # Initialize done flags
     
-    # Main training loop - iterate through the specified number of update cycles
-    for iteration in range(1, NUM_ITERATIONS + 1):
-        # Collect trajectory data by interacting with environments
-        for step in range(NUM_STEPS):
-            global_step += NUM_ENVS                        # Update step counter
-            logic_obs[step] = next_logic_obs               # Store current observation
-            dones[step] = next_done                        # Store current done flags
+    next_logic_obs, _ = envs.reset()
+    next_logic_obs = next_logic_obs.to(DEVICE)
+    next_done = torch.zeros(args.num_envs).to(DEVICE)
+    
+    
+    for iteration in range(1, args.num_iterations + 1):
+        
+        for step in range(args.num_steps):
+            global_step += args.num_envs                      
+            logic_obs[step] = next_logic_obs                  
+            dones[step] = next_done                           
             
-            # Get action from policy without computing gradients (data collection phase)
+            
             with torch.no_grad():
                 action, logprob, _, value = agent.get_action_and_value(next_logic_obs)
-                values[step] = value.flatten()             # Store value estimate
+                values[step] = value.flatten()                
             
-            actions[step] = action                         # Store selected action
-            logprobs[step] = logprob                       # Store log probability
+            actions[step] = action                            
+            logprobs[step] = logprob                          
             
-            # Execute action in environment and observe result
+            
             (next_logic_obs_np, _), reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
-            next_logic_obs = next_logic_obs_np.float().to(DEVICE)  # Convert to tensor and move to device
+            next_logic_obs = next_logic_obs_np.float().to(DEVICE)  
             
-            # Process termination flags (episode ended due to failure or time limit)
-            terminations = np.array(terminations)          # Convert to numpy array
-            truncations = np.array(truncations)            # Convert to numpy array
-            next_done = np.logical_or(terminations, truncations)  # Combined termination signal
-            rewards[step] = torch.tensor(reward).to(DEVICE).view(-1)  # Store rewards
-            next_done = torch.Tensor(next_done).to(DEVICE)  # Convert to tensor and move to device
             
-            # Process episode completions to log statistics
+            terminations = np.array(terminations)             
+            truncations = np.array(truncations)               
+            next_done = np.logical_or(terminations, truncations)  
+            rewards[step] = torch.tensor(reward).to(DEVICE).view(-1)  
+            next_done = torch.Tensor(next_done).to(DEVICE)    
+            
+            
+            episodic_game_returns += torch.tensor(reward).to(DEVICE).view(-1)
+            
+            
             for idx, info in enumerate(infos):
-                if "episode" in info:  # Environment signals episode completion
-                    # Print and log episode statistics
-                    print(f"global_step={global_step}, env={idx}, episodic_return={info['episode']['r']}, episodic_length={info['episode']['l']}")
+                if "episode" in info:  
+                   
+                    print(f"│ Step={global_step:8d} │ Env={idx:2d} │ Return={info['episode']['r']:6.1f} │ Length={info['episode']['l']:4d} │ Game Return={episodic_game_returns[idx]:6.1f} │")
                     writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                     writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    episodic_returns.append(info["episode"]["r"])  # Store for later analysis
-                    episodic_lengths.append(info["episode"]["l"])  # Store for later analysis
+                    writer.add_scalar("charts/episodic_game_return", episodic_game_returns[idx], global_step)
+                    episodic_returns.append(info["episode"]["r"])  
+                    episodic_lengths.append(info["episode"]["l"])  
+                    
+                    
+                    episodic_game_returns[idx] = 0
             
-            # Save model checkpoint when reaching milestone
+            
             if global_step > save_step_bar:
+                if has_rtpt:
+                    rtpt.step()  
+                
                 checkpoint_path = checkpoint_dir / f"step_{save_step_bar}.pth"
                 torch.save(agent.state_dict(), checkpoint_path)
-                print(f"\nSaved model at: {checkpoint_path}")
-                save_step_bar += SAVE_STEPS  # Update next checkpoint target
-        
-        # Compute advantages and returns using Generalized Advantage Estimation (GAE)
-        with torch.no_grad():  # No gradients needed for this computation
-            next_value = agent.get_value(next_logic_obs).reshape(1, -1)  # Get value of final state
-            advantages = torch.zeros_like(rewards).to(DEVICE)  # Initialize advantage tensor
-            lastgaelam = 0  # Running GAE value
-            
-            # Compute GAE in reverse order (from last step to first)
-            for t in reversed(range(NUM_STEPS)):
-                # Handle final step differently
-                if t == NUM_STEPS - 1:
-                    nextnonterminal = 1.0 - next_done  # Mask for non-terminal states
-                    nextvalues = next_value            # Use final value estimate
-                else:
-                    nextnonterminal = 1.0 - dones[t + 1]  # Mask for non-terminal states
-                    nextvalues = values[t + 1]            # Use stored value estimates
+                print(f"\n✓ Saved model at: {checkpoint_path}\n")
                 
-                # GAE formula components
-                delta = rewards[t] + GAMMA * nextvalues * nextnonterminal - values[t]  # TD error
-                advantages[t] = lastgaelam = delta + GAMMA * GAE_LAMBDA * nextnonterminal * lastgaelam  # GAE update
-            
-            returns = advantages + values  # Compute returns (advantage + value baseline)
+                
+                save_hyperparams(
+                    args=args,
+                    save_path=experiment_dir / "config.yaml",
+                    print_summary=False
+                )
+                
+                
+                training_log = (episodic_returns, episodic_lengths, value_losses, policy_losses, entropies)
+                with open(checkpoint_dir / "training_log.pkl", "wb") as f:
+                    pickle.dump(training_log, f)
+                
+                
+                save_step_bar += args.save_steps
         
-        # Prepare data for optimization by flattening batch dimensions
+        
+        with torch.no_grad():  
+            next_value = agent.get_value(next_logic_obs).reshape(1, -1)  
+            advantages = torch.zeros_like(rewards).to(DEVICE)  
+            lastgaelam = 0  
+            
+            
+            for t in reversed(range(args.num_steps)):
+                
+                if t == args.num_steps - 1:
+                    nextnonterminal = 1.0 - next_done  
+                    nextvalues = next_value            
+                else:
+                    nextnonterminal = 1.0 - dones[t + 1]  
+                    nextvalues = values[t + 1]            
+                
+                
+                delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]  
+                advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam  
+            
+            returns = advantages + values  
+        
+        
         b_logic_obs = logic_obs.reshape((-1,) + logic_observation_space)
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1,) + action_space)
@@ -182,75 +287,85 @@ def train():
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
         
-        # Prepare indices for minibatch sampling
-        b_inds = np.arange(BATCH_SIZE)
-        clipfracs = []  # Track fraction of clipped updates for monitoring
         
-        # Policy optimization phase - multiple epochs over the collected data
-        for epoch in range(UPDATE_EPOCHS):
-            np.random.shuffle(b_inds)  # Shuffle data for each epoch
+        b_inds = np.arange(args.batch_size)
+        clipfracs = []  
+        
+        
+        for epoch in range(args.update_epochs):
+            np.random.shuffle(b_inds)  
             
-            # Process data in minibatches
-            for start in range(0, BATCH_SIZE, MINIBATCH_SIZE):
-                end = start + MINIBATCH_SIZE
-                mb_inds = b_inds[start:end]  # Indices for current minibatch
+            
+            for start in range(0, args.batch_size, args.minibatch_size):
+                end = start + args.minibatch_size
+                mb_inds = b_inds[start:end]  
                 
-                # Compute updated probabilities and values
+                
                 _, newlogprob, entropy, newvalue = agent.get_action_and_value(
                     b_logic_obs[mb_inds], b_actions.long()[mb_inds]
                 )
                 
-                # Compute probability ratio for PPO
-                logratio = newlogprob - b_logprobs[mb_inds]  # Difference in log probabilities
-                ratio = logratio.exp()                       # Probability ratio
                 
-                # Calculate KL divergence for monitoring
+                logratio = newlogprob - b_logprobs[mb_inds]  
+                ratio = logratio.exp()                       
+                
+                
                 with torch.no_grad():
-                    old_approx_kl = (-logratio).mean()  # Approximate KL divergence
-                    approx_kl = ((ratio - 1) - logratio).mean()  # Alternative formulation
-                    clipfracs += [((ratio - 1.0).abs() > CLIP_COEF).float().mean().item()]  # Track clipping
+                    old_approx_kl = (-logratio).mean()  
+                    approx_kl = ((ratio - 1) - logratio).mean()  
+                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]  
                 
-                # Normalize advantages for more stable training
+                
                 mb_advantages = b_advantages[mb_inds]
                 mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
                 
-                # Compute PPO clipped surrogate objective for policy loss
-                pg_loss1 = -mb_advantages * ratio  # Unclipped surrogate objective
-                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - CLIP_COEF, 1 + CLIP_COEF)  # Clipped surrogate
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()  # Take the maximum (pessimistic bound)
                 
-                # Compute value loss with clipping for stability
-                newvalue = newvalue.view(-1)  # Flatten value predictions
-                v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2  # Unclipped MSE loss
+                pg_loss1 = -mb_advantages * ratio  
+                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)  
+                pg_loss = torch.max(pg_loss1, pg_loss2).mean()  
                 
-                # Implement clipped value loss similar to PPO's policy clipping
+                
+                newvalue = newvalue.view(-1)  
+                v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2  
+                
+                
                 v_clipped = b_values[mb_inds] + torch.clamp(
                     newvalue - b_values[mb_inds],
-                    -CLIP_COEF,
-                    CLIP_COEF,
+                    -args.clip_coef,
+                    args.clip_coef,
                 )
                 v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)  # Take the maximum (pessimistic)
-                v_loss = 0.5 * v_loss_max.mean()  # Scale value loss
+                v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)  
+                v_loss = 0.5 * v_loss_max.mean()  
                 
-                # Compute entropy loss to encourage exploration
+                
                 entropy_loss = entropy.mean()
                 
-                # Combine losses with appropriate weightings
-                loss = pg_loss - ENT_COEF * entropy_loss + v_loss * 0.5
                 
-                # Perform gradient update
-                optimizer.zero_grad()  # Clear previous gradients
-                loss.backward()        # Compute gradients
-                nn.utils.clip_grad_norm_(agent.parameters(), 0.5)  # Clip gradients for stability
-                optimizer.step()       # Apply gradient update
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * 0.5
+                
+                
+                optimizer.zero_grad()  
+                loss.backward()        
+                nn.utils.clip_grad_norm_(agent.parameters(), 0.5)  
+                optimizer.step()       
         
-        # Compute explained variance metric (quality of value function)
+        
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
         
-        # Log all metrics to TensorBoard
+        
+        sps = int(global_step / (time.time() - start_time))
+        print(f"\n=== Iteration {iteration}/{args.num_iterations} | Step {global_step} | SPS: {sps} ===")
+        
+        if iteration % 10 == 0:
+            
+            avg_return = np.mean(episodic_returns[-10:]) if episodic_returns else 0
+            avg_length = np.mean(episodic_lengths[-10:]) if episodic_lengths else 0
+            print(f"Recent Stats | Return: {avg_return:.1f} | Length: {avg_length:.1f}")
+        
+        
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
@@ -259,20 +374,34 @@ def train():
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        writer.add_scalar("charts/SPS", sps, global_step)
         
-        # Store metrics for later analysis
+        
         value_losses.append(v_loss.item())
         policy_losses.append(pg_loss.item())
         entropies.append(entropy_loss.item())
         
-        # Print current weights of logical rules to monitor learning
+        
+        print("\n===== CURRENT LOGICAL POLICY =====")
         agent._print()
     
-    # Cleanup: close environment and TensorBoard writer
+    
+    checkpoint_path = checkpoint_dir / f"step_final_{global_step}.pth"
+    torch.save(agent.state_dict(), checkpoint_path)
+    print(f"\n✓ Saved final model at: {checkpoint_path}")
+    
+    
+    training_log = (episodic_returns, episodic_lengths, value_losses, policy_losses, entropies)
+    with open(checkpoint_dir / "training_log_final.pkl", "wb") as f:
+        pickle.dump(training_log, f)
+    
+    
     envs.close()
     writer.close()
 
-# Entry point: run the training function when script is executed
+
 if __name__ == "__main__":
-    train()
+    
+    import tyro
+    args = tyro.cli(Args)
+    train(args)
