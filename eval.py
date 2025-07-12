@@ -12,7 +12,7 @@ def evaluate_agent(model_path, n_episodes=10, verbose=False):
     
     # Initialize environment and agent
     env = VectorizedNudgeBaseEnv.from_name("seaquest", n_envs=1, mode="logic", seed=8)
-    agent = LogicalAgent(env, rules="default", device="cpu")
+    agent = LogicalAgent(env, rules="default1", device="cpu")
     
     # Load model
     if not os.path.exists(model_path):
@@ -67,5 +67,5 @@ def evaluate_agent(model_path, n_episodes=10, verbose=False):
 
 # Run evaluation
 if __name__ == "__main__":
-    model_path = "out_logic/runs/seaquest_logic_lr_0.00025_gamma_0.99_entcoef_0.01/checkpoints/step_final_9999360.pth"
+    model_path = "out_logic/runs/seaquest_default1_seed_8/checkpoints/step_final_9999360.pth"
     evaluate_agent(model_path)

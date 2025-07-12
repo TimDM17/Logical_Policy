@@ -112,7 +112,7 @@ def train(args):
     args.num_iterations = args.total_timesteps // args.batch_size
     
     # Create directory structure for experiment outputs
-    run_name = f"{args.env_name}_logic_lr_{args.learning_rate}_gamma_{args.gamma}_entcoef_{args.ent_coef}"
+    run_name = f"{args.env_name}_{args.rules}_seed_{args.seed}" # Unique for rulesset and seed
     experiment_dir = OUT_PATH / "runs" / run_name      # Main experiment directory
     checkpoint_dir = experiment_dir / "checkpoints"    # Directory for model checkpoints
     writer_dir = OUT_PATH / "tensorboard" / run_name   # Directory for TensorBoard logs
