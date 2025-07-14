@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import os
 from logic_agent import LogicalAgent
-from env_vectorized import VectorizedNudgeBaseEnv
+from env_common.env_vectorized import VectorizedNudgeBaseEnv
 
 def evaluate_agent(model_path, n_episodes=10, verbose=False):
     """Evaluate a trained agent and report performance metrics"""

@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Import custom components for neural symbolic reinforcement learning
 from logic_agent import LogicalAgent            # Neural-symbolic agent that uses logical reasoning
-from env_vectorized import VectorizedNudgeBaseEnv  # Environment wrapper
+from env_common.env_vectorized import VectorizedNudgeBaseEnv  # Environment wrapper
 from utils import save_hyperparams                 # Utility for saving experiment parameters 
 
 # Optional: RTPT for tracking remaining training time

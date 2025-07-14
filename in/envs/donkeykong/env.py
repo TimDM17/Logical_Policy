@@ -6,7 +6,7 @@ import numpy as np
 import torch as th
 from ocatari.ram.donkeykong import MAX_NB_OBJECTS
 import gymnasium as gym
-from env_utils import make_env
+from env_common.env_utils import make_env
 
 
 class NudgeEnv(NudgeBaseEnv):
