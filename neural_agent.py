@@ -59,7 +59,7 @@ class NeuralAgent(nn.Module):
     
     def _print(self):
         """Print method for compatibility with LogicalAgent"""
-        print("Neural policy")
+        print("Neural policy\n")
     
     def _build_action_id_dict(self):
         """
