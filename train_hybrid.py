@@ -376,18 +376,31 @@ def train(args):
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
         
         # Print iteration summary
-        print(f"│ Iteration={iteration:4d}/{args.num_iterations} │ Step={global_step:8d} │", end=" ")
-        print(f"Policy Loss={avg_pg_loss:.4f} │ Value Loss={avg_value_loss:.4f} │", end=" ")
-        print(f"KL Loss={avg_kl_loss:.4f} │ KL Div={avg_kl_div:.4f} │", end=" ")
-        print(f"Entropy={avg_entropy_loss:.4f} │ Time={time.time() - start_time:.2f}s │")
+        sps = int(args.num_steps * args.num_envs / (time.time() - start_time))
+        print(f"\n=== Iteration {iteration}/{args.num_iterations} | Step {global_step} | SPS: {sps} ===")
+        # Print loss metrics in a cleaner format
+        print(f"Losses: Policy={avg_pg_loss:.4f} | Value={avg_value_loss:.4f} | KL={avg_kl_loss:.4f} | KL Div={avg_kl_div:.4f}")
         
-        # Write metrics to TensorBoard
-        writer.add_scalar("losses/policy_loss", avg_pg_loss, global_step)
+        # Add periodic statistics reporting
+        if iteration % 10 == 0:
+            # Print recent statistics
+            avg_return = np.mean(episodic_returns[-10:]) if episodic_returns else 0
+            avg_length = np.mean(episodic_lengths[-10:]) if episodic_lengths else 0
+            print(f"Recent Stats | Return: {avg_return:.1f} | Length: {avg_length:.1f}")
+            
+            # Print current policy weights
+            print("\n===== CURRENT HYBRID AGENT POLICY =====")
+            agent._print()
+
+        # Update TensorBoard metrics to include SPS
+        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", avg_value_loss, global_step)
-        writer.add_scalar("losses/kl_loss", avg_kl_loss, global_step)
+        writer.add_scalar("losses/policy_loss", avg_pg_loss, global_step)
         writer.add_scalar("losses/entropy", avg_entropy_loss, global_step)
-        writer.add_scalar("metrics/kl_divergence", avg_kl_div, global_step)
-        writer.add_scalar("metrics/explained_variance", explained_var, global_step)
+        writer.add_scalar("losses/kl_loss", avg_kl_loss, global_step)
+        writer.add_scalar("losses/approx_kl", avg_kl_div, global_step)
+        writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        writer.add_scalar("charts/SPS", sps, global_step)
     
     # Final save and cleanup
     final_checkpoint_path = checkpoint_dir / f"step_final_{global_step}.pth"
