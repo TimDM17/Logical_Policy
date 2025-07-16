@@ -126,7 +126,7 @@ def train(args):
     writer = SummaryWriter(writer_dir)
 
     # Save hyperparameters
-    save_hyperparams(args, experiment_dir)
+    save_hyperparams(args, "config.yaml")
 
     # Configure RTPT for progress tracking if available
     if has_rtpt:
