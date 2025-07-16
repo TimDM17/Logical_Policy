@@ -124,6 +124,10 @@ def train(args):
 
     # Setup TensorBoard writer
     writer = SummaryWriter(writer_dir)
+    writer.add_text(
+    "hyperparameters",
+    "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+)
 
     # Save hyperparameters
     save_hyperparams(args, experiment_dir / "config.yaml")
@@ -169,6 +173,10 @@ def train(args):
                                               seed=args.seed)
         agent = HybridAgent(envs, rules=args.rules, device=DEVICE, kl_coef=args.kl_coef)
         agent.to(DEVICE)
+    
+    # Policy printing after agent initialization
+    print("\n===== INITIAL HYBRID AGENT POLICY =====")
+    agent._print()
     
     # Initialize optimizer (only for neural agent parameters)
     optimizer = optim.Adam([
@@ -402,11 +410,8 @@ def train(args):
     writer.close()
 
 if __name__ == "__main__":
-    # Set default arguments
-    args = Args()
-    
-    # Parse any command-line arguments (optional implementation)
-    
-    # Start training
+    # Parse arguments and run training
+    import tyro
+    args = tyro.cli(Args)
     train(args)
 
