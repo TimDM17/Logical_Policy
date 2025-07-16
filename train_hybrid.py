@@ -175,13 +175,16 @@ def train(args):
         {"params": agent.neural_agent.parameters(), "lr": args.learning_rate},
     ], eps=1e-5)
 
+    # Define obervation space for object-centric representation
+    logic_observation_space = (envs.n_objects, 4) # Shape of object-centric state representation
+
     # Initialize experience buffers
-    logic_obs = torch.zeros((args.num_steps, args.num_envs) + envs.observation_space.shape,
+    logic_obs = torch.zeros((args.num_steps, args.num_envs) + logic_observation_space,
                            dtype=torch.float32, device=DEVICE)
     actions = torch.zeros((args.num_steps, args.num_envs), dtype=torch.long, device=DEVICE)
     logprobs = torch.zeros((args.num_steps, args.num_envs), dtype=torch.float32, device=DEVICE)
     rewards = torch.zeros((args.num_steps, args.num_envs), dtype=torch.float32, device=DEVICE)
-    dones = torch.zeros((args.num_steps, args.num_envs), dtype=torch.bool, device=DEVICE)
+    dones = torch.zeros((args.num_steps, args.num_envs), dtype=torch.float32, device=DEVICE)
     values = torch.zeros((args.num_steps, args.num_envs), dtype=torch.float32, device=DEVICE)
     kl_divs = torch.zeros((args.num_steps, args.num_envs), dtype=torch.float32, device=DEVICE)
 
@@ -189,7 +192,7 @@ def train(args):
     episodic_game_returns = torch.zeros((args.num_envs)).to(DEVICE)
 
     # Get initial observations
-    (next_logic_obs_np, _), _ = envs.reset() 
+    next_logic_obs_np, _ = envs.reset() 
     next_logic_obs = torch.tensor(next_logic_obs_np).float().to(DEVICE)
     next_done = torch.zeros(args.num_envs, device=DEVICE)
 
@@ -285,7 +288,7 @@ def train(args):
             returns = advantages + values
         
         # Flatten batch data for minibatch processing
-        b_logic_obs = logic_obs.reshape((-1,) + envs.observation_space.shape)
+        b_logic_obs = logic_obs.reshape((-1,) + logic_observation_space)
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape(-1)
         b_advantages = advantages.reshape(-1)
