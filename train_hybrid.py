@@ -113,7 +113,7 @@ def train(args):
     args.num_iterations = args.total_timesteps // args.batch_size
 
     # Setup TensorBoard, RTPT, output dirs
-    run_name = f"{args.env_name}_hybrid_kl{args.kl_coef}_lr_{args.learning_rate}_gamma_{args.gamma}_entcoef_{args.ent_coef}"
+    run_name = f"{args.env_name}_hybrid_kl{args.kl_coef}_{args.rules}_seed_{args.seed}"
     experiment_dir = OUT_PATH / "runs" / run_name      # Main experiment directory
     checkpoint_dir = experiment_dir / "checkpoints"    # Directory for model checkpoints
     writer_dir = OUT_PATH / "tensorboard" / run_name   # Directory for TensorBoard logs
@@ -126,7 +126,7 @@ def train(args):
     writer = SummaryWriter(writer_dir)
 
     # Save hyperparameters
-    save_hyperparams(args, "config.yaml")
+    save_hyperparams(args, experiment_dir / "config.yaml")
 
     # Configure RTPT for progress tracking if available
     if has_rtpt:
